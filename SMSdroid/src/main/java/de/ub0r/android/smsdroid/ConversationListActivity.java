@@ -507,6 +507,7 @@ public final class ConversationListActivity extends AppCompatActivity implements
         batchSelectionMode = true;
         // TODO Some visual indication that the mode is on (apart from the selected threads,
         //      as no threads may be selected, and still the mode is on).
+        //      (https://github.com/JanisE/smsdroid/issues/3)
     }
 
     private void setBatchSelectionModeOff() {
@@ -515,7 +516,7 @@ public final class ConversationListActivity extends AppCompatActivity implements
         batchSelectionMode = false;
 
         if (! batchSelectionBeingProcessed) {
-            // TODO Update the view (see removeThreadFromSelection).
+            // TODO Update the view (see removeThreadFromSelection). (https://github.com/JanisE/smsdroid/issues/4)
             selectedThreads.clear();
         }
         // Else: "selectedThreads" are managed by the deletion process.
@@ -699,7 +700,7 @@ public final class ConversationListActivity extends AppCompatActivity implements
                     }
                 }, 0);
 
-                // FIXME The stuff below does not work.
+                // FIXME The stuff below does not work. (https://github.com/JanisE/smsdroid/issues/2)
 //                if (selectedThreads.size() > 0) {
 //                    String contentUri = getCommonContentUriPart(selectedThreads.iterator().next());
 //                    String threadIdCondition = "";
