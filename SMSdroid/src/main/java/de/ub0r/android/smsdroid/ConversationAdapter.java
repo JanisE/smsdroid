@@ -109,7 +109,7 @@ public class ConversationAdapter extends ResourceCursorAdapter {
     /**
      * View holder.
      */
-    private static class ViewHolder {
+    public static class ViewHolder {
 
         TextView tvBody;
 
@@ -122,6 +122,28 @@ public class ConversationAdapter extends ResourceCursorAdapter {
         ImageView ivPhoto;
 
         View vRead;
+
+        View vSelected;
+
+        public void MarkConversationSelected () {
+			Log.d(TAG, "MarkConversationSelected()");
+
+            if (vSelected != null) {
+                vSelected.setVisibility(View.VISIBLE);
+            }
+            else {
+                Log.e(TAG, "Marking a (unexisting?) view which has no 'selected' view as selected.");
+            }
+        }
+
+        public void MarkConversationUnselected () {
+            if (vSelected != null) {
+                vSelected.setVisibility(View.INVISIBLE);
+            }
+            else {
+                Log.e(TAG, "Marking a (unexisting?) view which has no 'selected' view as unselected.");
+            }
+        }
     }
 
     /**
@@ -241,6 +263,7 @@ public class ConversationAdapter extends ResourceCursorAdapter {
             holder.tvDate = (TextView) view.findViewById(R.id.date);
             holder.ivPhoto = (ImageView) view.findViewById(R.id.photo);
             holder.vRead = view.findViewById(R.id.read);
+            holder.vSelected = view.findViewById(R.id.selected);
             view.setTag(holder);
         }
 
@@ -290,6 +313,12 @@ public class ConversationAdapter extends ResourceCursorAdapter {
             holder.vRead.setVisibility(View.VISIBLE);
         } else {
             holder.vRead.setVisibility(View.INVISIBLE);
+        }
+
+        if (((ConversationListActivity) activity).isThreadSelected(c.getUri())) {
+            holder.MarkConversationSelected();
+        } else {
+            holder.MarkConversationUnselected();
         }
 
         // body

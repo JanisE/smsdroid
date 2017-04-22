@@ -37,6 +37,7 @@ import android.database.sqlite.SQLiteException;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
 import android.preference.PreferenceManager;
 import android.provider.Telephony;
 import android.support.annotation.NonNull;
@@ -57,6 +58,8 @@ import android.widget.ListView;
 import android.widget.Toast;
 
 import java.util.Calendar;
+import java.util.HashSet;
+import java.util.Set;
 
 import de.ub0r.android.lib.DonationHelper;
 import de.ub0r.android.lib.Utils;
@@ -85,7 +88,7 @@ public final class ConversationListActivity extends AppCompatActivity implements
     /**
      * Number of items.
      */
-    private static final int WHICH_N = 6;
+    private static final int WHICH_N = 7;
 
     /**
      * Index in dialog: answer.
@@ -108,14 +111,34 @@ public final class ConversationListActivity extends AppCompatActivity implements
     private static final int WHICH_VIEW = 3;
 
     /**
+     * Index in dialog: batch-select.
+     */
+    private static final int WHICH_BATCH_SELECT = 4;
+
+    /**
      * Index in dialog: delete.
      */
-    private static final int WHICH_DELETE = 4;
+    private static final int WHICH_DELETE = 5;
 
     /**
      * Index in dialog: mark as spam.
      */
-    private static final int WHICH_MARK_SPAM = 5;
+    private static final int WHICH_MARK_SPAM = 6;
+
+    /**
+     * Number of items in the selection menu.
+     */
+    private static final int WHICH_SELECTION_N = 2;
+
+    /**
+     * Index in dialog: batch-select.
+     */
+    private static final int WHICH_SELECTION_CANCEL_SELECTION = 0;
+
+    /**
+     * Index in dialog: batch-select.
+     */
+    private static final int WHICH_SELECTION_DELETE_THREADS = 1;
 
     /**
      * Minimum date.
@@ -141,6 +164,28 @@ public final class ConversationListActivity extends AppCompatActivity implements
      * Dialog items shown if an item was long clicked.
      */
     private String[] longItemClickDialog = null;
+
+    /**
+     * Dialog items shown if an item was long clicked in selection mode.
+     */
+    private String[] longThreadSelectionClickDialog = null;
+
+    /**
+     * Handle conversation touches as though selecting them.
+     */
+    private boolean batchSelectionMode = false;
+
+    /**
+     * Are threads being deleted now?
+     */
+    private boolean batchSelectionBeingProcessed = false;
+
+    /**
+     * IDs of selected conversations (for a batch/bulk action).
+     */
+    private Set<Uri> selectedThreads = new HashSet<>();
+
+    private static Handler threadDeletionHandler;
 
     /**
      * Conversations.
@@ -297,8 +342,13 @@ public final class ConversationListActivity extends AppCompatActivity implements
         longItemClickDialog[WHICH_CALL] = getString(R.string.call);
         longItemClickDialog[WHICH_VIEW_CONTACT] = getString(R.string.view_contact_);
         longItemClickDialog[WHICH_VIEW] = getString(R.string.view_thread_);
+        longItemClickDialog[WHICH_BATCH_SELECT] = getString(R.string.batch_select_);
         longItemClickDialog[WHICH_DELETE] = getString(R.string.delete_thread_);
         longItemClickDialog[WHICH_MARK_SPAM] = getString(R.string.filter_spam_);
+
+        longThreadSelectionClickDialog = new String[WHICH_SELECTION_N];
+        longThreadSelectionClickDialog[WHICH_SELECTION_CANCEL_SELECTION] = getString(R.string.cancel_thread_selection);
+        longThreadSelectionClickDialog[WHICH_SELECTION_DELETE_THREADS] = getString(R.string.delete_selected_threads_);
 
         initAdapter();
 
@@ -379,6 +429,28 @@ public final class ConversationListActivity extends AppCompatActivity implements
         boolean hideDeleteAll = p
                 .getBoolean(PreferencesActivity.PREFS_HIDE_DELETE_ALL_THREADS, false);
         menu.findItem(R.id.item_delete_all_threads).setVisible(!hideDeleteAll);
+
+        if (! batchSelectionMode) {
+            menu.findItem(R.id.item_cancel_batch_select).setVisible(false);
+            menu.findItem(R.id.item_delete_selected_threads).setVisible(false);
+
+            menu.findItem(R.id.item_compose).setVisible(true);
+            menu.findItem(R.id.item_batch_select).setVisible(true);
+            menu.findItem(R.id.item_mark_all_read).setVisible(true);
+            menu.findItem(R.id.item_delete_all_threads).setVisible(!hideDeleteAll);
+            menu.findItem(R.id.item_settings).setVisible(true);
+        }
+        else {
+            menu.findItem(R.id.item_cancel_batch_select).setVisible(true);
+            menu.findItem(R.id.item_delete_selected_threads).setVisible(true);
+
+            menu.findItem(R.id.item_compose).setVisible(false);
+            menu.findItem(R.id.item_batch_select).setVisible(false);
+            menu.findItem(R.id.item_mark_all_read).setVisible(false);
+            menu.findItem(R.id.item_delete_all_threads).setVisible(false);
+            menu.findItem(R.id.item_settings).setVisible(false);
+        }
+
         return true;
     }
 
@@ -412,6 +484,85 @@ public final class ConversationListActivity extends AppCompatActivity implements
                 }
                 return;
             }
+        }
+    }
+
+    private void stopThreadDeletion ()
+    {
+        if (threadDeletionHandler != null) {
+            threadDeletionHandler.removeCallbacksAndMessages(null);
+            threadDeletionHandler = null;
+        }
+
+        batchSelectionBeingProcessed = false;
+    }
+
+    private void setBatchSelectionModeOn() {
+        Log.d(TAG, "setBatchSelectionModeOn");
+
+        // Stop the previous process.
+        stopThreadDeletion();
+        selectedThreads.clear();
+
+        batchSelectionMode = true;
+        // TODO Some visual indication that the mode is on (apart from the selected threads,
+        //      as no threads may be selected, and still the mode is on).
+    }
+
+    private void setBatchSelectionModeOff() {
+        Log.d(TAG, "setBatchSelectionModeOff");
+
+        batchSelectionMode = false;
+
+        if (! batchSelectionBeingProcessed) {
+            // TODO Update the view (see removeThreadFromSelection).
+            selectedThreads.clear();
+        }
+        // Else: "selectedThreads" are managed by the deletion process.
+    }
+
+    public boolean isThreadSelected(Uri threadUri)
+    {
+        return selectedThreads.contains(threadUri);
+    }
+
+    private void toggleThreadSelection(Uri threadUri, final View view) {
+        Log.d(TAG, "toggleThreadSelection(threadUri): ", threadUri);
+
+        if (batchSelectionMode) {
+            if (! isThreadSelected(threadUri)) {
+                addThreadToSelection(threadUri, view);
+            }
+            else {
+                removeThreadFromSelection(threadUri, view);
+            }
+        }
+        else {
+            Log.e(TAG, "toggleThreadSelection called in ! batchSelectionMode mode! Thread: ", threadUri);
+        }
+    }
+
+    private void addThreadToSelection(Uri threadUri, final View view) {
+        Log.d(TAG, "addThreadToSelection(threadUri): ", threadUri);
+
+        if (batchSelectionMode) {
+            selectedThreads.add(threadUri);
+            ((ConversationAdapter.ViewHolder) view.getTag()).MarkConversationSelected();
+        }
+        else {
+            Log.e(TAG, "addThreadToSelection called in ! batchSelectionMode mode! Thread: ", threadUri);
+        }
+    }
+
+    private void removeThreadFromSelection(Uri threadUri, final View view) {
+        Log.d(TAG, "removeThreadFromSelection(threadUri): ", threadUri);
+
+        if (batchSelectionMode) {
+            selectedThreads.remove(threadUri);
+            ((ConversationAdapter.ViewHolder) view.getTag()).MarkConversationUnselected();
+        }
+        else {
+            Log.e(TAG, "addThreadToSelection called in ! batchSelectionMode mode! Thread: ", threadUri);
         }
     }
 
@@ -486,6 +637,128 @@ public final class ConversationListActivity extends AppCompatActivity implements
         builder.show();
     }
 
+//    private String getCommonContentUriPart (Uri uri)
+//    {
+//        return uri.toString().substring(0, uri.toString().length() - uri.getLastPathSegment().length());
+//    }
+
+    /**
+     * Delete threads selected previously.
+     */
+    public void deleteSelectedThreads ()
+    {
+        Log.i(TAG, "deleteSelectedThreads(): count of selected threads = ", selectedThreads.size(), ".");
+        final Builder builder = new Builder(this);
+        builder.setTitle(R.string.delete_selected_threads_);
+        builder.setMessage(R.string.delete_selected_threads_question);
+        builder.setNegativeButton(android.R.string.no, null);
+
+        builder.setPositiveButton(android.R.string.yes, new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(final DialogInterface dialog, final int which) {
+                batchSelectionBeingProcessed = true;
+
+                Log.d(TAG, "deleteSelectedThreads(): ", selectedThreads.size(), " threads.");
+
+                threadDeletionHandler = new Handler();
+                threadDeletionHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        Log.d(TAG, "Deleting next thread...");
+
+                        int threadCount = selectedThreads.size();
+
+                        if (threadCount > 0) {
+                            Uri threadUri = selectedThreads.iterator().next();
+
+                            try {
+                                Log.d(TAG, "Deleting: " + threadUri.toString());
+                                final int ret = getContentResolver().delete(threadUri, null, null);
+                                Log.d(TAG, "deleted: ", ret);
+
+                            } catch (IllegalArgumentException e) {
+                                Log.e(TAG, "Argument Error", e);
+                                Toast.makeText(ConversationListActivity.this, R.string.error_unknown, Toast.LENGTH_LONG).show();
+                            } catch (SQLiteException e) {
+                                Log.e(TAG, "SQL Error", e);
+                                Toast.makeText(ConversationListActivity.this, R.string.error_unknown, Toast.LENGTH_LONG).show();
+                            }
+
+                            selectedThreads.remove(threadUri);
+                            threadDeletionHandler.postDelayed(this, threadCount - 1 > 0 ? 40000 : 0);
+                        }
+                        else {
+                            Log.i(TAG, "All selected threads processed.");
+
+                            stopThreadDeletion();
+
+                            Conversation.flushCache();
+                            Message.flushCache();
+                            SmsReceiver.updateNewMessageNotification(ConversationListActivity.this, null);
+                        }
+                    }
+                }, 0);
+
+                // FIXME The stuff below does not work.
+//                if (selectedThreads.size() > 0) {
+//                    String contentUri = getCommonContentUriPart(selectedThreads.iterator().next());
+//                    String threadIdCondition = "";
+//                    String separator = "";
+//                    for (Uri threadUri : selectedThreads) {
+//                        try {
+//                            if (contentUri.equals(getCommonContentUriPart(threadUri))) {
+//                                int threadId = Integer.parseInt(threadUri.getLastPathSegment());
+//                                threadIdCondition += separator + threadId;
+//                                separator = ", ";   // Add a comma before all subsequent (just not the first) parts.
+//                            }
+//                            else {
+//                                // Collect only threads with the same common URI part.
+//                                //      TODO Collect all selected threads in separate sets and delete each one separately.
+//                                //      Workaround: After the first deletion one type of threads are deleted.
+//                                //          In the second attempt the other type(s) may be deleted.
+//                                Log.i(TAG, "Ignored thread with another URI part: " + getCommonContentUriPart(threadUri));
+//                            }
+//                        } catch (NumberFormatException e) {
+//                            Log.e(TAG, "unable to parse thread id from uri: ", threadUri, e);
+//                        }
+//                    }
+//
+//                    if (! threadIdCondition.isEmpty()) {
+//                        try {
+//                            threadIdCondition = Telephony.Sms.THREAD_ID + " IN (" + threadIdCondition + ")";
+//                            Log.d(TAG, "Deleting " + contentUri + " WHERE " + threadIdCondition);
+//                            final int ret = getContentResolver().delete(Uri.parse(contentUri), Telephony.Sms.THREAD_ID + " IN (" + threadIdCondition + ")", null);
+//                            Log.d(TAG, "deleted: ", ret);
+//
+//                            if (ret > 0) {
+//                                Conversation.flushCache();
+//                                Message.flushCache();
+//                                SmsReceiver.updateNewMessageNotification(ConversationListActivity.this, null);
+//                            }
+//                        } catch (IllegalArgumentException e) {
+//                            Log.e(TAG, "Argument Error", e);
+//                            Toast.makeText(ConversationListActivity.this, R.string.error_unknown, Toast.LENGTH_LONG).show();
+//                        } catch (SQLiteException e) {
+//                            Log.e(TAG, "SQL Error", e);
+//                            Toast.makeText(ConversationListActivity.this, R.string.error_unknown, Toast.LENGTH_LONG).show();
+//                        }
+//                    }
+//                    else {
+//                        Log.e(TAG, "Nothing to delete, which is unexpected at this point.");
+//                    }
+//                }
+//                // Else: Nothing was selected, nothing actually to do.
+
+                setBatchSelectionModeOff();
+
+//                Conversation.flushCache();
+//                Message.flushCache();
+//                SmsReceiver.updateNewMessageNotification(ConversationListActivity.this, null);
+            }
+        });
+        builder.show();
+    }
+
     /**
      * Add or remove an entry to/from blacklist.
      *
@@ -535,6 +808,17 @@ public final class ConversationListActivity extends AppCompatActivity implements
                 markRead(this, Uri.parse("content://sms/"), 1);
                 markRead(this, Uri.parse("content://mms/"), 1);
                 return true;
+            case R.id.item_batch_select:
+                setBatchSelectionModeOn();
+                // Return to the conversation list.
+                return true;
+            case R.id.item_cancel_batch_select:
+                setBatchSelectionModeOff();
+                // Return to the conversation list.
+                return true;
+            case R.id.item_delete_selected_threads:
+                deleteSelectedThreads();
+                return true;
             default:
                 return super.onOptionsItemSelected(item);
         }
@@ -582,15 +866,21 @@ public final class ConversationListActivity extends AppCompatActivity implements
         final Conversation c = Conversation.getConversation(this,
                 (Cursor) parent.getItemAtPosition(position), false);
         final Uri target = c.getUri();
-        final Intent i = new Intent(this, MessageListActivity.class);
-        i.setData(target);
-        try {
-            startActivity(i);
-        } catch (ActivityNotFoundException e) {
-            Log.e(TAG, "error launching intent: ", i.getAction(), ", ", i.getData());
-            Toast.makeText(this,
-                    "error launching messaging app!\n" + "Please contact the developer.",
-                    Toast.LENGTH_LONG).show();
+
+        if (batchSelectionMode) {
+            toggleThreadSelection(target, view);
+        }
+        else {
+            final Intent i = new Intent(this, MessageListActivity.class);
+            i.setData(target);
+            try {
+                startActivity(i);
+            } catch (ActivityNotFoundException e) {
+                Log.e(TAG, "error launching intent: ", i.getAction(), ", ", i.getData());
+                Toast.makeText(this,
+                        "error launching messaging app!\n" + "Please contact the developer.",
+                        Toast.LENGTH_LONG).show();
+            }
         }
     }
 
@@ -607,73 +897,99 @@ public final class ConversationListActivity extends AppCompatActivity implements
             return true;
         }
         Builder builder = new Builder(this);
-        String[] items = longItemClickDialog;
-        final Contact contact = c.getContact();
-        final String a = contact.getNumber();
-        Log.d(TAG, "p: ", a);
-        final String n = contact.getName();
-        if (TextUtils.isEmpty(n)) {
-            builder.setTitle(a);
-            items = items.clone();
-            items[WHICH_VIEW_CONTACT] = getString(R.string.add_contact_);
-        } else {
-            builder.setTitle(n);
+
+        if (! batchSelectionMode) {
+            String[] items = longItemClickDialog;
+            final Contact contact = c.getContact();
+            final String a = contact.getNumber();
+            Log.d(TAG, "p: ", a);
+            final String n = contact.getName();
+            if (TextUtils.isEmpty(n)) {
+                builder.setTitle(a);
+                items = items.clone();
+                items[WHICH_VIEW_CONTACT] = getString(R.string.add_contact_);
+            } else {
+                builder.setTitle(n);
+            }
+            if (SpamDB.isBlacklisted(getApplicationContext(), a)) {
+                items = items.clone();
+                items[WHICH_MARK_SPAM] = getString(R.string.dont_filter_spam_);
+            }
+            builder.setItems(items, new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(final DialogInterface dialog, final int which) {
+                    Intent i;
+                    try {
+                        switch (which) {
+                            case WHICH_ANSWER:
+                                ConversationListActivity.this.startActivity(getComposeIntent(
+                                        ConversationListActivity.this, a, false));
+                                break;
+                            case WHICH_CALL:
+                                i = new Intent(Intent.ACTION_VIEW, Uri.parse("tel:" + a));
+                                ConversationListActivity.this.startActivity(i);
+                                break;
+                            case WHICH_VIEW_CONTACT:
+                                if (n == null) {
+                                    i = ContactsWrapper.getInstance().getInsertPickIntent(a);
+                                    Conversation.flushCache();
+                                } else {
+                                    final Uri uri = c.getContact().getUri();
+                                    i = new Intent(Intent.ACTION_VIEW, uri);
+                                }
+                                ConversationListActivity.this.startActivity(i);
+                                break;
+                            case WHICH_VIEW:
+                                i = new Intent(ConversationListActivity.this,
+                                        MessageListActivity.class);
+                                i.setData(target);
+                                ConversationListActivity.this.startActivity(i);
+                                break;
+                            case WHICH_BATCH_SELECT:
+                                setBatchSelectionModeOn();
+                                addThreadToSelection(target, view);
+                                break;
+                            case WHICH_DELETE:
+                                ConversationListActivity
+                                        .deleteMessages(ConversationListActivity.this, target,
+                                                R.string.delete_thread_,
+                                                R.string.delete_thread_question,
+                                                null);
+                                break;
+                            case WHICH_MARK_SPAM:
+                                ConversationListActivity.addToOrRemoveFromSpamlist(
+                                        ConversationListActivity.this, c.getContact().getNumber());
+                                break;
+                            default:
+                                break;
+                        }
+                    } catch (ActivityNotFoundException e) {
+                        Log.e(TAG, "unable to launch activity:", e);
+                        Toast.makeText(ConversationListActivity.this, R.string.error_unknown,
+                                Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
         }
-        if (SpamDB.isBlacklisted(getApplicationContext(), a)) {
-            items = items.clone();
-            items[WHICH_MARK_SPAM] = getString(R.string.dont_filter_spam_);
-        }
-        builder.setItems(items, new DialogInterface.OnClickListener() {
-            @Override
-            public void onClick(final DialogInterface dialog, final int which) {
-                Intent i;
-                try {
+        else {
+            String[] items = longThreadSelectionClickDialog;
+
+            builder.setItems(longThreadSelectionClickDialog, new DialogInterface.OnClickListener() {
+                @Override
+                public void onClick(final DialogInterface dialog, final int which) {
                     switch (which) {
-                        case WHICH_ANSWER:
-                            ConversationListActivity.this.startActivity(getComposeIntent(
-                                    ConversationListActivity.this, a, false));
+                        case WHICH_SELECTION_CANCEL_SELECTION:
+                            setBatchSelectionModeOff();
                             break;
-                        case WHICH_CALL:
-                            i = new Intent(Intent.ACTION_VIEW, Uri.parse("tel:" + a));
-                            ConversationListActivity.this.startActivity(i);
-                            break;
-                        case WHICH_VIEW_CONTACT:
-                            if (n == null) {
-                                i = ContactsWrapper.getInstance().getInsertPickIntent(a);
-                                Conversation.flushCache();
-                            } else {
-                                final Uri uri = c.getContact().getUri();
-                                i = new Intent(Intent.ACTION_VIEW, uri);
-                            }
-                            ConversationListActivity.this.startActivity(i);
-                            break;
-                        case WHICH_VIEW:
-                            i = new Intent(ConversationListActivity.this,
-                                    MessageListActivity.class);
-                            i.setData(target);
-                            ConversationListActivity.this.startActivity(i);
-                            break;
-                        case WHICH_DELETE:
-                            ConversationListActivity
-                                    .deleteMessages(ConversationListActivity.this, target,
-                                            R.string.delete_thread_,
-                                            R.string.delete_thread_question,
-                                            null);
-                            break;
-                        case WHICH_MARK_SPAM:
-                            ConversationListActivity.addToOrRemoveFromSpamlist(
-                                    ConversationListActivity.this, c.getContact().getNumber());
+                        case WHICH_SELECTION_DELETE_THREADS:
+                            deleteSelectedThreads();
                             break;
                         default:
                             break;
                     }
-                } catch (ActivityNotFoundException e) {
-                    Log.e(TAG, "unable to launch activity:", e);
-                    Toast.makeText(ConversationListActivity.this, R.string.error_unknown,
-                            Toast.LENGTH_LONG).show();
                 }
-            }
-        });
+            });
+        }
         builder.create().show();
         return true;
     }

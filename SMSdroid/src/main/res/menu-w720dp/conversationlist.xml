@@ -24,10 +24,22 @@
             android:icon="@drawable/ic_menu_compose"
             app:showAsAction="always|withText"/>
     <item
+        android:id="@+id/item_batch_select"
+        android:icon="@drawable/ic_menu_mark"
+        android:title="@string/batch_select_"/>
+    <item
+        android:id="@+id/item_cancel_batch_select"
+        android:icon="@drawable/ic_menu_mark"
+        android:title="@string/cancel_thread_selection"/>
+    <item
             android:id="@+id/item_mark_all_read"
             android:title="@string/mark_all_read_"
             android:icon="@drawable/ic_menu_mark"
             app:showAsAction="ifRoom|withText"/>
+    <item
+        android:id="@+id/item_delete_selected_threads"
+        android:icon="@android:drawable/ic_menu_delete"
+        android:title="@string/delete_selected_threads_"/>
     <item
             android:id="@+id/item_delete_all_threads"
             android:title="@string/delete_threads_"

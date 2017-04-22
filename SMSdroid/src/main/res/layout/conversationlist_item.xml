@@ -17,12 +17,17 @@
     not, see <http://www.gnu.org/licenses/>.
 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:tools="http://schemas.android.com/tools"
               android:layout_width="fill_parent" android:layout_height="wrap_content"
               android:orientation="horizontal" android:paddingRight="5dip">
     <View android:id="@+id/read" android:background="#FF00AA00"
           android:layout_height="fill_parent" android:layout_width="5dip"
           android:layout_alignParentLeft="true" android:layout_centerVertical="true"
-          android:visibility="invisible" android:layout_marginRight="2dip"/>
+          android:visibility="invisible" android:layout_marginRight="0dip"/>
+    <View android:id="@+id/selected" android:background="#FF00AAFF"
+          android:layout_height="fill_parent" android:layout_width="4dip"
+          android:layout_alignParentLeft="true" android:layout_centerVertical="true"
+          android:visibility="invisible" android:layout_marginRight="0dip"/>
     <ImageView android:id="@+id/photo" android:layout_width="60dip"
                android:layout_height="60dip" android:scaleType="fitCenter"
                android:adjustViewBounds="true" android:layout_gravity="center_vertical"
@@ -36,11 +41,11 @@
                   android:layout_height="wrap_content" android:id="@+id/date"
                   android:text="@id/date"/>
         <TextView android:layout_width="wrap_content"
-                  android:layout_height="wrap_content" android:layout_alignParentTop="true"
-                  android:layout_toLeftOf="@id/date" android:id="@+id/count"
-                  android:text="(@id/count)"
-                  android:textAppearance="?android:attr/textAppearanceMedium"
-                  android:paddingRight="2dip"/>
+            android:layout_height="wrap_content" android:layout_alignParentTop="true"
+            android:layout_toLeftOf="@id/date" android:id="@+id/count"
+            android:text="(@id/count)"
+            android:textAppearance="?android:attr/textAppearanceMedium"
+            android:paddingRight="2dip"/>
         <TextView android:text="@+id/addr" android:id="@+id/addr"
                   android:layout_width="wrap_content" android:layout_height="wrap_content"
                   android:layout_toLeftOf="@+id/count" android:layout_alignParentLeft="true"
